@@ -2,12 +2,7 @@ import { motion } from "framer-motion";
 import { useCartStore } from "../stores/useCartStore";
 import { Link } from "react-router-dom";
 import { MoveRight } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
 import axios from "../lib/axios";
-
-const stripePromise = loadStripe(
-	"pk_test_51KZYccCoOZF2UhtOwdXQl3vcizup20zqKqT9hVUIsVzsdBrhqbUI2fE0ZdEVLdZfeHjeyFXtqaNsyCJCmZWnjNZa00PzMAjlcL"
-);
 
 const OrderSummary = () => {
 	const { total, subtotal, coupon, isCouponApplied, cart } = useCartStore();
@@ -18,19 +13,49 @@ const OrderSummary = () => {
 	const formattedSavings = savings.toFixed(2);
 
 	const handlePayment = async () => {
-		const stripe = await stripePromise;
-		const res = await axios.post("/payments/create-checkout-session", {
-			products: cart,
-			couponCode: coupon ? coupon.code : null,
-		});
+		try {
+			console.log("Button clicked!");
+			// Create an order on the server
+			const res = await axios.post("/payments/create-checkout-session", {
+				amount: total * 100*80, // Razorpay expects amount in paisa
+				products: cart,
+				couponCode: coupon ? coupon.code : null,
+			});
+			console.log(res.data); // Log the response to check its structure
+			const { orderId, currency, key } = res.data;
 
-		const session = res.data;
-		const result = await stripe.redirectToCheckout({
-			sessionId: session.id,
-		});
+			// Open Razorpay checkout
+			const options = {
+				key:key, // Razorpay key from server
+				amount: total * 100*80,
+				currency: currency,
+				name: "Iztend",
+				description: "Order Payment",
+				order_id: orderId,
+				handler: async function (response) {
+					// Send payment confirmation to the server
+					await axios.post("/payments/checkout-success", {
+						razorpay_payment_id: response.razorpay_payment_id,
+						razorpay_order_id: response.razorpay_order_id,
+						razorpay_signature: response.razorpay_signature,
+					});
+					alert("Payment successful!");
+				},
+				prefill: {
+					name: "Customer Name",
+					email: "customer@example.com",
+					contact: "9876543210",
+				},
+				theme: {
+					color: "#10b981", // Customize theme color
+				},
+			};
 
-		if (result.error) {
-			console.error("Error:", result.error);
+			const rzp = new window.Razorpay(options);
+			rzp.open();
+			console.log("Server Response:", res.data);
+		} catch (error) {
+			console.error("Error during payment:", error);
 		}
 	};
 
@@ -42,21 +67,18 @@ const OrderSummary = () => {
 			transition={{ duration: 0.5 }}
 		>
 			<p className='text-xl font-semibold text-emerald-400'>Order summary</p>
-
 			<div className='space-y-4'>
 				<div className='space-y-2'>
 					<dl className='flex items-center justify-between gap-4'>
 						<dt className='text-base font-normal text-gray-300'>Original price</dt>
 						<dd className='text-base font-medium text-white'>${formattedSubtotal}</dd>
 					</dl>
-
 					{savings > 0 && (
 						<dl className='flex items-center justify-between gap-4'>
 							<dt className='text-base font-normal text-gray-300'>Savings</dt>
 							<dd className='text-base font-medium text-emerald-400'>-${formattedSavings}</dd>
 						</dl>
 					)}
-
 					{coupon && isCouponApplied && (
 						<dl className='flex items-center justify-between gap-4'>
 							<dt className='text-base font-normal text-gray-300'>Coupon ({coupon.code})</dt>
@@ -68,7 +90,6 @@ const OrderSummary = () => {
 						<dd className='text-base font-bold text-emerald-400'>${formattedTotal}</dd>
 					</dl>
 				</div>
-
 				<motion.button
 					className='flex w-full items-center justify-center rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-300'
 					whileHover={{ scale: 1.05 }}
@@ -77,7 +98,6 @@ const OrderSummary = () => {
 				>
 					Proceed to Checkout
 				</motion.button>
-
 				<div className='flex items-center justify-center gap-2'>
 					<span className='text-sm font-normal text-gray-400'>or</span>
 					<Link
@@ -92,4 +112,5 @@ const OrderSummary = () => {
 		</motion.div>
 	);
 };
+
 export default OrderSummary;
